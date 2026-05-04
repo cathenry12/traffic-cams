@@ -39,31 +39,92 @@ HTML_TEMPLATE = """
         .video-link { display: block; color: #ffcc00; text-decoration: none; margin-bottom: 5px; }
         .video-link:hover { text-decoration: underline; }
         
-        .mgmt-section { background: #333; padding: 20px; border-radius: 12px; margin-bottom: 40px; border-left: 4px solid #00ff88; }
-        input[type="text"], input[type="url"] { background: #444; border: 1px solid #555; color: white; padding: 8px; border-radius: 4px; margin-right: 10px; }
+        .section { background: #333; padding: 20px; border-radius: 12px; margin-bottom: 20px; border-left: 4px solid #00ff88; }
+        .section-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .section-grid { grid-template-columns: 1fr; } }
+        
+        input, select { background: #444; border: 1px solid #555; color: white; padding: 8px; border-radius: 4px; margin-bottom: 10px; }
         button { cursor: pointer; padding: 8px 15px; border-radius: 4px; border: none; font-weight: bold; transition: 0.2s; }
         .btn-add { background: #00ff88; color: #1a1a1a; }
         .btn-edit { background: #00d2ff; color: #1a1a1a; font-size: 0.8em; }
         .btn-delete { background: #ff4444; color: white; font-size: 0.8em; }
-        .btn-cancel { background: #666; color: white; font-size: 0.8em; }
+        .btn-manual { background: #ffcc00; color: #1a1a1a; }
         
-        .edit-form { display: none; margin-top: 10px; padding: 10px; background: #333; border-radius: 8px; }
-        .controls { display: flex; gap: 10px; margin-top: 10px; }
+        .form-group { display: flex; flex-direction: column; }
+        label { font-size: 0.8em; color: #888; margin-bottom: 4px; }
     </style>
-    <script>
-        function toggleEdit(id) {
-            const form = document.getElementById('edit-' + id);
-            form.style.display = form.style.display === 'block' ? 'none' : 'block';
-        }
-    </script>
 </head>
 <body>
     <h1>🚦 Traffic Camera Dashboard</h1>
 
-    <div class="mgmt-section">
+    <div class="section-grid">
+        <!-- Global Settings -->
+        <div class="section">
+            <h3>⚙️ Global Settings</h3>
+            <form action="/settings" method="POST">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group">
+                        <label>Capture Interval (sec)</label>
+                        <input type="number" name="interval" value="{{ config.capture_interval_seconds }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Playback FPS</label>
+                        <input type="number" name="fps" value="{{ config.playback_fps }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Auto-Schedule (Time)</label>
+                        <input type="text" name="schedule" value="{{ config.generate_timelapse_schedule }}">
+                    </div>
+                    <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px;">
+                        <input type="checkbox" name="delete_images" {% if config.delete_images_after_compile %}checked{% endif %}>
+                        <label style="margin: 0;">Auto-delete images</label>
+                    </div>
+                </div>
+                <button type="submit" class="btn-add" style="width: 100%; margin-top: 10px;">Update All Settings</button>
+            </form>
+        </div>
+
+        <!-- Manual Generation -->
+        <div class="section" style="border-left-color: #ffcc00;">
+            <h3>🎬 Manual Time-lapse</h3>
+            <form action="/generate_manual" method="POST">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group">
+                        <label>Select Camera</label>
+                        <select name="name" id="manual-cam" onchange="updateStats()">
+                            {% for cam in cameras %}
+                                <option value="{{ cam.name }}">{{ cam.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Select Date</label>
+                        <select name="date" id="manual-date" onchange="updateStats()">
+                            {% for d in available_dates %}
+                                <option value="{{ d }}">{{ d }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>FPS Overide</label>
+                        <input type="number" name="fps" value="{{ config.playback_fps }}">
+                    </div>
+                    <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px;">
+                        <input type="checkbox" name="delete_images" checked>
+                        <label style="margin: 0;">Delete raw images</label>
+                    </div>
+                </div>
+                <div id="stats-display" style="font-size: 0.8em; color: #ffcc00; margin-bottom: 10px;">Select a date to see image count...</div>
+                <button type="submit" class="btn-manual" style="width: 100%;">🚀 Generate Now</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Camera -->
+    <div class="section" style="border-left-color: #00d2ff;">
         <h3>➕ Add New Camera</h3>
         <form action="/add" method="POST" style="display: flex; flex-wrap: wrap; gap: 10px;">
-            <input type="text" name="name" placeholder="Camera Name (e.g. I-65 Main St)" required>
+            <input type="text" name="name" placeholder="Camera Name" required>
             <input type="url" name="url" placeholder="Camera Feed URL" required style="flex-grow: 1;">
             <button type="submit" class="btn-add">Add Camera</button>
         </form>
@@ -74,36 +135,34 @@ HTML_TEMPLATE = """
         <div class="camera-card">
             <h2>
                 {{ cam.name }}
-                <div class="controls">
+                <div style="display: flex; gap: 5px;">
                     <button class="btn-edit" onclick="toggleEdit({{ cam.id }})">Edit</button>
-                    <form action="/delete/{{ cam.id }}" method="POST" style="display:inline;" onsubmit="return confirm('Delete this camera?');">
-                        <button type="submit" class="btn-delete">Delete</button>
+                    <form action="/delete/{{ cam.id }}" method="POST" style="display:inline;" onsubmit="return confirm('Delete?');">
+                        <button type="submit" class="btn-delete">Del</button>
                     </form>
                 </div>
             </h2>
             
-            <div id="edit-{{ cam.id }}" class="edit-form">
+            <div id="edit-{{ cam.id }}" style="display:none; margin-top:10px; background:#333; padding:10px; border-radius:8px;">
                 <form action="/edit/{{ cam.id }}" method="POST">
-                    <input type="text" name="name" value="{{ cam.name }}" required style="width: 90%; margin-bottom: 5px;">
-                    <input type="url" name="url" value="{{ cam.url }}" required style="width: 90%; margin-bottom: 5px;">
-                    <div style="margin-top: 5px;">
-                        <button type="submit" class="btn-edit">Update</button>
-                        <button type="button" class="btn-cancel" onclick="toggleEdit({{ cam.id }})">Cancel</button>
-                    </div>
+                    <input type="text" name="name" value="{{ cam.name }}" style="width:90%">
+                    <input type="url" name="url" value="{{ cam.url }}" style="width:90%">
+                    <button type="submit" class="btn-edit">Save</button>
+                    <button type="button" onclick="toggleEdit({{ cam.id }})" style="background:#666; color:white;">X</button>
                 </form>
             </div>
 
-            <div class="meta">URL: <span style="font-size: 0.8em; opacity: 0.6;">{{ cam.url }}</span></div>
-            <div class="meta">Latest Capture: {{ cam.latest_time }}</div>
+            <div class="meta" style="word-break: break-all; opacity: 0.5;">{{ cam.url }}</div>
+            <div class="meta">Latest: {{ cam.latest_time }}</div>
             
             {% if cam.latest_img %}
-                <img src="/data/{{ cam.latest_img }}" alt="Latest Capture">
+                <img src="/data/{{ cam.latest_img }}" alt="Latest">
             {% else %}
-                <div style="height:200px; display:flex; align-items:center; justify-content:center; background:#333; border-radius:8px; margin-top:10px;">No images yet</div>
+                <div style="height:200px; display:flex; align-items:center; justify-content:center; background:#333; border-radius:8px;">No images</div>
             {% endif %}
             
             <div class="video-list">
-                <strong>Time-lapses:</strong>
+                <strong>Archive:</strong>
                 {% for vid in cam.videos %}
                     <a class="video-link" href="/data/{{ vid.path }}" target="_blank">🎬 {{ vid.date }}</a>
                 {% endfor %}
@@ -111,6 +170,28 @@ HTML_TEMPLATE = """
         </div>
         {% endfor %}
     </div>
+
+    <script>
+        function toggleEdit(id) {
+            const el = document.getElementById('edit-' + id);
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function updateStats() {
+            const cam = document.getElementById('manual-cam').value;
+            const date = document.getElementById('manual-date').value;
+            const display = document.getElementById('stats-display');
+            if (!cam || !date) return;
+            
+            display.innerText = "Checking...";
+            const res = await fetch(`/stats/${cam}/${date}`);
+            const data = await res.json();
+            display.innerText = `Folder contains ${data.count} images for this time-lapse.`;
+        }
+        
+        // Initial check
+        window.onload = updateStats;
+    </script>
 </body>
 </html>
 """
@@ -119,10 +200,53 @@ def save_config(config):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
 
+@app.route('/settings', methods=['POST'])
+def update_settings():
+    from flask import request, redirect
+    config = load_config()
+    config['capture_interval_seconds'] = int(request.form.get('interval', 60))
+    config['playback_fps'] = int(request.form.get('fps', 30))
+    config['generate_timelapse_schedule'] = request.form.get('schedule', '00:00')
+    config['delete_images_after_compile'] = 'delete_images' in request.form
+    save_config(config)
+    setup_scheduler() # Refresh the scheduler with new settings
+    return redirect('/')
+
+@app.route('/stats/<name>/<date>')
+def get_stats(name, date):
+    from flask import jsonify
+    cam_dir = os.path.join(DATA_DIR, name, date)
+    count = len(glob.glob(os.path.join(cam_dir, "*.jpg"))) if os.path.exists(cam_dir) else 0
+    return jsonify({"count": count})
+
+@app.route('/generate_manual', methods=['POST'])
+def generate_manual():
+    from flask import request, redirect
+    name = request.form.get('name')
+    date_str = request.form.get('date') # YYYY-MM-DD
+    fps = int(request.form.get('fps', 30))
+    delete_images = 'delete_images' in request.form
+    
+    if name and date_str:
+        target_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+        # Run in a separate thread to not block the UI
+        threading.Thread(target=lambda: generate_timelapse(target_date=target_date, manual_fps=fps, manual_delete=delete_images)).start()
+        
+    return redirect('/')
+
 @app.route('/')
 def index():
     config = load_config()
     camera_data = []
+    
+    # Get available dates from all cameras
+    available_dates = set()
+    for cam in config.get("cameras", []):
+        name = cam.get("name")
+        date_folders = glob.glob(os.path.join(DATA_DIR, name, "*-*-*"))
+        for d in date_folders:
+            available_dates.add(os.path.basename(d))
+    
     for idx, cam in enumerate(config.get("cameras", [])):
         name = cam.get("name")
         # Find latest image
@@ -150,7 +274,11 @@ def index():
             "latest_time": latest_time,
             "videos": videos
         })
-    return render_template_string(HTML_TEMPLATE, cameras=camera_data)
+    
+    return render_template_string(HTML_TEMPLATE, 
+                                cameras=camera_data, 
+                                config=config, 
+                                available_dates=sorted(list(available_dates), reverse=True))
 
 @app.route('/add', methods=['POST'])
 def add_camera():
@@ -272,13 +400,13 @@ def job_capture_all():
     for cam in config.get("cameras", []):
         capture_camera(cam)
 
-def generate_timelapse(target_date=None):
+def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
     config = load_config()
     if not config:
         return
     
-    fps = config.get("playback_fps", 30)
-    delete_images = config.get("delete_images_after_compile", False)
+    fps = manual_fps if manual_fps is not None else config.get("playback_fps", 30)
+    delete_images = manual_delete if manual_delete is not None else config.get("delete_images_after_compile", False)
     
     if target_date:
         date_str = target_date.strftime("%Y-%m-%d")
@@ -287,7 +415,7 @@ def generate_timelapse(target_date=None):
         yesterday = datetime.datetime.now() - datetime.timedelta(days=1)
         date_str = yesterday.strftime("%Y-%m-%d")
     
-    logging.info(f"Starting timelapse generation for date: {date_str}")
+    logging.info(f"Starting timelapse generation for date: {date_str} (FPS: {fps}, Delete: {delete_images})")
     
     for cam in config.get("cameras", []):
         name = cam.get("name")
@@ -299,20 +427,12 @@ def generate_timelapse(target_date=None):
             
         output_video = os.path.join(DATA_DIR, name, f"{name}_{date_str}.mp4")
         
-        # Build ffmpeg command
-        # ffmpeg requires sequential numbering or globbing.
-        # Globbing is easiest: ffmpeg -pattern_type glob -i "*.jpg" ...
-        # But wait, globbing is not always supported on all platforms in ffmpeg (e.g., Windows sometimes).
-        # We can rename files or use an input text file for ffmpeg, or use cv2.VideoWriter as a reliable fallback.
-        # Let's try cv2.VideoWriter as it is cross-platform and already installed via opencv-python.
-        
         images = sorted(glob.glob(os.path.join(cam_dir, "*.jpg")))
         if not images:
             continue
             
         logging.info(f"Compiling {len(images)} images for {name} into {output_video} at {fps} FPS.")
         
-        # Read first image to get dimensions
         first_frame = cv2.imread(images[0])
         if first_frame is None:
             logging.error(f"Failed to read first image {images[0]}")
@@ -321,21 +441,16 @@ def generate_timelapse(target_date=None):
         height, width, layers = first_frame.shape
         size = (width, height)
         
-        # Define the codec and create VideoWriter object
-        # mp4v is standard for MP4
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_video, fourcc, fps, size)
         
         for image_path in images:
             frame = cv2.imread(image_path)
             if frame is not None:
-                # Resize if the frame size changed
                 if (frame.shape[1], frame.shape[0]) != size:
                     frame = cv2.resize(frame, size)
                 out.write(frame)
-            else:
-                logging.warning(f"Could not read image {image_path}, skipping.")
-                
+        
         out.release()
         logging.info(f"Finished timelapse: {output_video}")
         
@@ -346,32 +461,33 @@ def generate_timelapse(target_date=None):
                     os.remove(img_path)
                 except Exception as e:
                     logging.error(f"Error removing {img_path}: {e}")
-            # Optionally remove the directory
             try:
                 os.rmdir(cam_dir)
             except OSError:
                 pass
 
-def run():
+def setup_scheduler():
     config = load_config()
-    if not config:
-        logging.error("Exiting due to missing config.")
-        return
-
+    if not config: return
+    
+    schedule.clear()
     interval = config.get("capture_interval_seconds", 60)
     schedule_time = config.get("generate_timelapse_schedule", "00:00")
+    
+    logging.info(f"Scheduling captures every {interval} seconds.")
+    schedule.every(interval).seconds.do(job_capture_all)
+    
+    logging.info(f"Scheduling daily timelapse generation at {schedule_time}.")
+    schedule.every().day.at(schedule_time).do(generate_timelapse)
 
+def run():
     # Start the web dashboard in a separate thread
     logging.info("Starting web dashboard on port 5000...")
     web_thread = threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False))
     web_thread.daemon = True
     web_thread.start()
 
-    logging.info(f"Scheduling captures every {interval} seconds.")
-    schedule.every(interval).seconds.do(job_capture_all)
-    
-    logging.info(f"Scheduling daily timelapse generation at {schedule_time}.")
-    schedule.every().day.at(schedule_time).do(generate_timelapse)
+    setup_scheduler()
     
     # Run a capture immediately
     job_capture_all()
