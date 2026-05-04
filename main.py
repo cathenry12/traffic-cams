@@ -8,12 +8,101 @@ import datetime
 import subprocess
 import glob
 import cv2
+import threading
+from flask import Flask, render_template_string, send_from_directory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 CONFIG_FILE = "config.json"
 DATA_DIR = "data"
+
+app = Flask(__name__)
+
+# --- WEB DASHBOARD LOGIC ---
+
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Traffic Cam Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: white; padding: 20px; }
+        .camera-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .camera-card { background: #2a2a2a; border-radius: 12px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        img, video { width: 100%; border-radius: 8px; margin-top: 10px; }
+        h1 { text-align: center; color: #00ff88; }
+        h2 { margin: 0; color: #00d2ff; }
+        .meta { font-size: 0.8em; color: #888; margin-bottom: 10px; }
+        .video-list { margin-top: 15px; font-size: 0.9em; }
+        .video-link { display: block; color: #ffcc00; text-decoration: none; margin-bottom: 5px; }
+        .video-link:hover { text-decoration: underline; }
+    </style>
+    <meta http-equiv="refresh" content="60">
+</head>
+<body>
+    <h1>🚦 Traffic Camera Dashboard</h1>
+    <div class="camera-grid">
+        {% for cam in cameras %}
+        <div class="camera-card">
+            <h2>{{ cam.name }}</h2>
+            <div class="meta">Latest Capture: {{ cam.latest_time }}</div>
+            {% if cam.latest_img %}
+                <img src="/data/{{ cam.latest_img }}" alt="Latest Capture">
+            {% else %}
+                <div style="height:200px; display:flex; align-items:center; justify-content:center; background:#333; border-radius:8px;">No images yet</div>
+            {% endif %}
+            
+            <div class="video-list">
+                <strong>Time-lapses:</strong>
+                {% for vid in cam.videos %}
+                    <a class="video-link" href="/data/{{ vid.path }}" target="_blank">🎬 {{ vid.date }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
+"""
+
+@app.route('/')
+def index():
+    config = load_config()
+    camera_data = []
+    for cam in config.get("cameras", []):
+        name = cam.get("name")
+        # Find latest image
+        all_images = sorted(glob.glob(os.path.join(DATA_DIR, name, "**", "*.jpg"), recursive=True))
+        latest_img = None
+        latest_time = "N/A"
+        if all_images:
+            latest_img_path = all_images[-1]
+            latest_img = latest_img_path.replace(DATA_DIR + os.sep, "").replace("\\", "/")
+            latest_time = os.path.basename(latest_img_path).replace(".jpg", "").replace("-", ":")
+
+        # Find all videos
+        all_videos = sorted(glob.glob(os.path.join(DATA_DIR, name, "*.mp4")), reverse=True)
+        videos = []
+        for v in all_videos:
+            v_name = os.path.basename(v)
+            date_part = v_name.replace(f"{name}_", "").replace(".mp4", "")
+            videos.append({"path": f"{name}/{v_name}".replace("\\", "/"), "date": date_part})
+
+        camera_data.append({
+            "name": name,
+            "latest_img": latest_img,
+            "latest_time": latest_time,
+            "videos": videos
+        })
+    return render_template_string(HTML_TEMPLATE, cameras=camera_data)
+
+@app.route('/data/<path:filename>')
+def serve_data(filename):
+    return send_from_directory(os.path.abspath(DATA_DIR), filename)
+
+# --- CAPTURE LOGIC ---
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -186,6 +275,12 @@ def run():
 
     interval = config.get("capture_interval_seconds", 60)
     schedule_time = config.get("generate_timelapse_schedule", "00:00")
+
+    # Start the web dashboard in a separate thread
+    logging.info("Starting web dashboard on port 5000...")
+    web_thread = threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False))
+    web_thread.daemon = True
+    web_thread.start()
 
     logging.info(f"Scheduling captures every {interval} seconds.")
     schedule.every(interval).seconds.do(job_capture_all)
