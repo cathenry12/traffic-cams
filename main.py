@@ -28,30 +28,78 @@ HTML_TEMPLATE = """
     <title>Traffic Cam Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: white; padding: 20px; }
-        .camera-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
-        .camera-card { background: #2a2a2a; border-radius: 12px; padding: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        img, video { width: 100%; border-radius: 8px; margin-top: 10px; }
-        h1 { text-align: center; color: #00ff88; }
-        h2 { margin: 0; color: #00d2ff; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: white; padding: 20px; max-width: 1200px; margin: auto; }
+        .camera-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
+        .camera-card { background: #2a2a2a; border-radius: 12px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); position: relative; }
+        img, video { width: 100%; border-radius: 8px; margin-top: 10px; background: #000; min-height: 200px; }
+        h1 { text-align: center; color: #00ff88; margin-bottom: 30px; }
+        h2 { margin: 0; color: #00d2ff; display: flex; justify-content: space-between; align-items: center; }
         .meta { font-size: 0.8em; color: #888; margin-bottom: 10px; }
-        .video-list { margin-top: 15px; font-size: 0.9em; }
+        .video-list { margin-top: 15px; font-size: 0.9em; max-height: 150px; overflow-y: auto; padding-right: 5px; }
         .video-link { display: block; color: #ffcc00; text-decoration: none; margin-bottom: 5px; }
         .video-link:hover { text-decoration: underline; }
+        
+        .mgmt-section { background: #333; padding: 20px; border-radius: 12px; margin-bottom: 40px; border-left: 4px solid #00ff88; }
+        input[type="text"], input[type="url"] { background: #444; border: 1px solid #555; color: white; padding: 8px; border-radius: 4px; margin-right: 10px; }
+        button { cursor: pointer; padding: 8px 15px; border-radius: 4px; border: none; font-weight: bold; transition: 0.2s; }
+        .btn-add { background: #00ff88; color: #1a1a1a; }
+        .btn-edit { background: #00d2ff; color: #1a1a1a; font-size: 0.8em; }
+        .btn-delete { background: #ff4444; color: white; font-size: 0.8em; }
+        .btn-cancel { background: #666; color: white; font-size: 0.8em; }
+        
+        .edit-form { display: none; margin-top: 10px; padding: 10px; background: #333; border-radius: 8px; }
+        .controls { display: flex; gap: 10px; margin-top: 10px; }
     </style>
-    <meta http-equiv="refresh" content="60">
+    <script>
+        function toggleEdit(id) {
+            const form = document.getElementById('edit-' + id);
+            form.style.display = form.style.display === 'block' ? 'none' : 'block';
+        }
+    </script>
 </head>
 <body>
     <h1>🚦 Traffic Camera Dashboard</h1>
+
+    <div class="mgmt-section">
+        <h3>➕ Add New Camera</h3>
+        <form action="/add" method="POST" style="display: flex; flex-wrap: wrap; gap: 10px;">
+            <input type="text" name="name" placeholder="Camera Name (e.g. I-65 Main St)" required>
+            <input type="url" name="url" placeholder="Camera Feed URL" required style="flex-grow: 1;">
+            <button type="submit" class="btn-add">Add Camera</button>
+        </form>
+    </div>
+
     <div class="camera-grid">
         {% for cam in cameras %}
         <div class="camera-card">
-            <h2>{{ cam.name }}</h2>
+            <h2>
+                {{ cam.name }}
+                <div class="controls">
+                    <button class="btn-edit" onclick="toggleEdit({{ cam.id }})">Edit</button>
+                    <form action="/delete/{{ cam.id }}" method="POST" style="display:inline;" onsubmit="return confirm('Delete this camera?');">
+                        <button type="submit" class="btn-delete">Delete</button>
+                    </form>
+                </div>
+            </h2>
+            
+            <div id="edit-{{ cam.id }}" class="edit-form">
+                <form action="/edit/{{ cam.id }}" method="POST">
+                    <input type="text" name="name" value="{{ cam.name }}" required style="width: 90%; margin-bottom: 5px;">
+                    <input type="url" name="url" value="{{ cam.url }}" required style="width: 90%; margin-bottom: 5px;">
+                    <div style="margin-top: 5px;">
+                        <button type="submit" class="btn-edit">Update</button>
+                        <button type="button" class="btn-cancel" onclick="toggleEdit({{ cam.id }})">Cancel</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="meta">URL: <span style="font-size: 0.8em; opacity: 0.6;">{{ cam.url }}</span></div>
             <div class="meta">Latest Capture: {{ cam.latest_time }}</div>
+            
             {% if cam.latest_img %}
                 <img src="/data/{{ cam.latest_img }}" alt="Latest Capture">
             {% else %}
-                <div style="height:200px; display:flex; align-items:center; justify-content:center; background:#333; border-radius:8px;">No images yet</div>
+                <div style="height:200px; display:flex; align-items:center; justify-content:center; background:#333; border-radius:8px; margin-top:10px;">No images yet</div>
             {% endif %}
             
             <div class="video-list">
@@ -67,11 +115,15 @@ HTML_TEMPLATE = """
 </html>
 """
 
+def save_config(config):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+
 @app.route('/')
 def index():
     config = load_config()
     camera_data = []
-    for cam in config.get("cameras", []):
+    for idx, cam in enumerate(config.get("cameras", [])):
         name = cam.get("name")
         # Find latest image
         all_images = sorted(glob.glob(os.path.join(DATA_DIR, name, "**", "*.jpg"), recursive=True))
@@ -91,12 +143,45 @@ def index():
             videos.append({"path": f"{name}/{v_name}".replace("\\", "/"), "date": date_part})
 
         camera_data.append({
+            "id": idx,
             "name": name,
+            "url": cam.get("url"),
             "latest_img": latest_img,
             "latest_time": latest_time,
             "videos": videos
         })
     return render_template_string(HTML_TEMPLATE, cameras=camera_data)
+
+@app.route('/add', methods=['POST'])
+def add_camera():
+    from flask import request, redirect
+    name = request.form.get('name')
+    url = request.form.get('url')
+    if name and url:
+        config = load_config()
+        config['cameras'].append({'name': name, 'url': url})
+        save_config(config)
+    return redirect('/')
+
+@app.route('/edit/<int:cam_id>', methods=['POST'])
+def edit_camera(cam_id):
+    from flask import request, redirect
+    name = request.form.get('name')
+    url = request.form.get('url')
+    config = load_config()
+    if 0 <= cam_id < len(config['cameras']):
+        config['cameras'][cam_id] = {'name': name, 'url': url}
+        save_config(config)
+    return redirect('/')
+
+@app.route('/delete/<int:cam_id>', methods=['POST'])
+def delete_camera(cam_id):
+    from flask import redirect
+    config = load_config()
+    if 0 <= cam_id < len(config['cameras']):
+        config['cameras'].pop(cam_id)
+        save_config(config)
+    return redirect('/')
 
 @app.route('/data/<path:filename>')
 def serve_data(filename):
