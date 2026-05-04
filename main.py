@@ -247,28 +247,33 @@ def generate_manual():
 def index():
     config = load_config()
     camera_data = []
-    
-    # Get available dates from all cameras
     available_dates = set()
-    for cam in config.get("cameras", []):
-        name = cam.get("name")
-        date_folders = glob.glob(os.path.join(DATA_DIR, name, "*-*-*"))
-        for d in date_folders:
-            available_dates.add(os.path.basename(d))
     
+    # Efficiently find available dates and latest images
     for idx, cam in enumerate(config.get("cameras", [])):
         name = cam.get("name")
-        # Find latest image
-        all_images = sorted(glob.glob(os.path.join(DATA_DIR, name, "**", "*.jpg"), recursive=True))
+        cam_root = os.path.join(DATA_DIR, name)
+        
         latest_img = None
         latest_time = "N/A"
-        if all_images:
-            latest_img_path = all_images[-1]
-            latest_img = latest_img_path.replace(DATA_DIR + os.sep, "").replace("\\", "/")
-            latest_time = os.path.basename(latest_img_path).replace(".jpg", "").replace("-", ":")
+        
+        if os.path.exists(cam_root):
+            # Get date folders (e.g., 2026-05-04)
+            date_folders = sorted([d for d in os.listdir(cam_root) if os.path.isdir(os.path.join(cam_root, d)) and "-" in d], reverse=True)
+            for d in date_folders:
+                available_dates.add(d)
+            
+            # Find latest image from the most recent date folder only
+            if date_folders:
+                latest_date_dir = os.path.join(cam_root, date_folders[0])
+                images = sorted(glob.glob(os.path.join(latest_date_dir, "*.jpg")))
+                if images:
+                    latest_img_path = images[-1]
+                    latest_img = latest_img_path.replace(DATA_DIR + os.sep, "").replace("\\", "/")
+                    latest_time = f"{date_folders[0]} {os.path.basename(latest_img_path).replace('.jpg', '').replace('-', ':')}"
 
-        # Find all videos
-        all_videos = sorted(glob.glob(os.path.join(DATA_DIR, name, "*.mp4")), reverse=True)
+        # Find all videos (these are in the camera root, so no recursion needed)
+        all_videos = sorted(glob.glob(os.path.join(cam_root, "*.mp4")), reverse=True)
         videos = []
         for v in all_videos:
             v_name = os.path.basename(v)
