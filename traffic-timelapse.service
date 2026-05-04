@@ -1,0 +1,17 @@
+[Unit]
+Description=Traffic Camera Time-Lapse Generator
+After=network.target
+
+[Service]
+Type=simple
+# Replace /home/pi/traffic-cams with the actual directory where the files are located
+WorkingDirectory=/home/pi/traffic-cams
+# Make sure python3 is installed and the dependencies are met.
+# Alternatively, use a virtual environment: /home/pi/traffic-cams/venv/bin/python
+ExecStart=/usr/bin/python3 main.py
+
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
