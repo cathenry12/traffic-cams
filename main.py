@@ -9,7 +9,7 @@ import subprocess
 import glob
 import cv2
 import threading
-from flask import Flask, render_template_string, send_from_directory
+from flask import Flask, render_template_string, send_from_directory, request, redirect, jsonify
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -211,7 +211,6 @@ def save_config(config):
 
 @app.route('/settings', methods=['POST'])
 def update_settings():
-    from flask import request, redirect
     config = load_config()
     config['capture_interval_seconds'] = int(request.form.get('interval', 60))
     config['playback_fps'] = int(request.form.get('fps', 30))
@@ -223,14 +222,12 @@ def update_settings():
 
 @app.route('/stats/<name>/<date>')
 def get_stats(name, date):
-    from flask import jsonify
     cam_dir = os.path.join(DATA_DIR, name, date)
     count = len(glob.glob(os.path.join(cam_dir, "*.jpg"))) if os.path.exists(cam_dir) else 0
     return jsonify({"count": count})
 
 @app.route('/generate_manual', methods=['POST'])
 def generate_manual():
-    from flask import request, redirect
     name = request.form.get('name')
     date_str = request.form.get('date') # YYYY-MM-DD
     fps = int(request.form.get('fps', 30))
@@ -253,40 +250,34 @@ def index():
     for idx, cam in enumerate(config.get("cameras", [])):
         name = cam.get("name")
         cam_root = os.path.join(DATA_DIR, name)
-        
         latest_img = None
         latest_time = "N/A"
         
         if os.path.exists(cam_root):
-            # Get date folders (e.g., 2026-05-04)
             date_folders = sorted([d for d in os.listdir(cam_root) if os.path.isdir(os.path.join(cam_root, d)) and "-" in d], reverse=True)
             for d in date_folders:
                 available_dates.add(d)
             
-            # Find latest image from the most recent date folder only
             if date_folders:
                 latest_date_dir = os.path.join(cam_root, date_folders[0])
-                images = sorted(glob.glob(os.path.join(latest_date_dir, "*.jpg")))
+                # Fast way to get latest image without globbing everything
+                images = sorted([f for f in os.listdir(latest_date_dir) if f.endswith('.jpg')])
                 if images:
-                    latest_img_path = images[-1]
-                    latest_img = latest_img_path.replace(DATA_DIR + os.sep, "").replace("\\", "/")
-                    latest_time = f"{date_folders[0]} {os.path.basename(latest_img_path).replace('.jpg', '').replace('-', ':')}"
+                    latest_img_name = images[-1]
+                    latest_img = f"{name}/{date_folders[0]}/{latest_img_name}".replace("\\", "/")
+                    latest_time = f"{date_folders[0]} {latest_img_name.replace('.jpg', '').replace('-', ':')}"
 
         # Find all videos (these are in the camera root, so no recursion needed)
-        all_videos = sorted(glob.glob(os.path.join(cam_root, "*.mp4")), reverse=True)
         videos = []
-        for v in all_videos:
-            v_name = os.path.basename(v)
-            date_part = v_name.replace(f"{name}_", "").replace(".mp4", "")
-            videos.append({"path": f"{name}/{v_name}".replace("\\", "/"), "date": date_part})
+        if os.path.exists(cam_root):
+            all_vids = sorted([f for f in os.listdir(cam_root) if f.endswith('.mp4')], reverse=True)
+            for v in all_vids:
+                date_part = v.replace(f"{name}_", "").replace(".mp4", "")
+                videos.append({"path": f"{name}/{v}".replace("\\", "/"), "date": date_part})
 
         camera_data.append({
-            "id": idx,
-            "name": name,
-            "url": cam.get("url"),
-            "latest_img": latest_img,
-            "latest_time": latest_time,
-            "videos": videos
+            "id": idx, "name": name, "url": cam.get("url"),
+            "latest_img": latest_img, "latest_time": latest_time, "videos": videos
         })
     
     return render_template_string(HTML_TEMPLATE, 
