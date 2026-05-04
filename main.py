@@ -181,12 +181,21 @@ HTML_TEMPLATE = """
             const cam = document.getElementById('manual-cam').value;
             const date = document.getElementById('manual-date').value;
             const display = document.getElementById('stats-display');
-            if (!cam || !date) return;
+            if (!cam || !date) {
+                display.innerText = "Select a camera and date first.";
+                return;
+            }
             
             display.innerText = "Checking...";
-            const res = await fetch(`/stats/${cam}/${date}`);
-            const data = await res.json();
-            display.innerText = `Folder contains ${data.count} images for this time-lapse.`;
+            try {
+                const res = await fetch(`/stats/${encodeURIComponent(cam)}/${encodeURIComponent(date)}`);
+                if (!res.ok) throw new Error("Server error");
+                const data = await res.json();
+                display.innerText = `Folder contains ${data.count} images for this time-lapse.`;
+            } catch (err) {
+                console.error(err);
+                display.innerText = "Error: Could not fetch stats. Make sure the service is running.";
+            }
         }
         
         // Initial check
