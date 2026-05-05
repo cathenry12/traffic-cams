@@ -484,6 +484,17 @@ def job_capture_all():
     for cam in config.get("cameras", []):
         capture_camera(cam)
 
+def fallback_opencv(images, output_video, fps, size):
+    logging.info("Using OpenCV fallback for video generation.")
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_video, fourcc, fps, size)
+    for image_path in images:
+        frame = cv2.imread(image_path)
+        if frame is not None:
+            frame = cv2.resize(frame, size)
+            out.write(frame)
+    out.release()
+
 def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
     config = load_config()
     if not config:
@@ -532,24 +543,45 @@ def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
         
         logging.info(f"Compiling {len(images)} images for {name} into {output_video} at {fps} FPS. Size: {width}x{height}")
         
-        # Try avc1 (H.264) for better web compatibility, fallback to mp4v
+        # Generate a temporary file list for ffmpeg
+        list_file = os.path.join(cam_dir, "ffmpeg_list.txt")
+        with open(list_file, 'w') as f:
+            for image_path in images:
+                # ffmpeg requires paths in a specific format in the list file
+                f.write(f"file '{os.path.abspath(image_path)}'\\n")
+        
+        logging.info(f"Compiling {len(images)} images for {name} using FFmpeg.")
+        
+        # FFmpeg command:
+        # -y: overwrite
+        # -r: input framerate
+        # -f concat: use the list file
+        # -safe 0: allow absolute paths
+        # -c:v libx264: use H.264
+        # -pix_fmt yuv420p: ensure compatibility with all players
+        # -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2": ensure even dimensions
+        cmd = [
+            "ffmpeg", "-y", "-r", str(fps), 
+            "-f", "concat", "-safe", "0", "-i", list_file,
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+            output_video
+        ]
+        
         try:
-            fourcc = cv2.VideoWriter_fourcc(*'avc1')
-            out = cv2.VideoWriter(output_video, fourcc, fps, size)
-            if not out.isOpened():
-                raise Exception("avc1 failed")
-        except:
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(output_video, fourcc, fps, size)
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode == 0:
+                logging.info(f"Finished timelapse via FFmpeg: {output_video}")
+            else:
+                logging.error(f"FFmpeg failed: {result.stderr}")
+                # Fallback to OpenCV if FFmpeg is missing/fails
+                fallback_opencv(images, output_video, fps, size)
+        except Exception as e:
+            logging.error(f"Error running FFmpeg: {e}")
         
-        for image_path in images:
-            frame = cv2.imread(image_path)
-            if frame is not None:
-                # Always resize to the target even size to ensure consistency
-                frame = cv2.resize(frame, size)
-                out.write(frame)
-        
-        out.release()
+        # Clean up list file
+        if os.path.exists(list_file):
+            os.remove(list_file)
         logging.info(f"Finished timelapse: {output_video}")
         
         if delete_images:
