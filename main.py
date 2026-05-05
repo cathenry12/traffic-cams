@@ -110,6 +110,10 @@ HTML_TEMPLATE = """
                         <label>FPS Overide</label>
                         <input type="number" name="fps" value="{{ config.playback_fps }}">
                     </div>
+                    <div class="form-group">
+                        <label>Custom Name (Optional)</label>
+                        <input type="text" name="custom_name" placeholder="e.g. morning_rush">
+                    </div>
                     <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px;">
                         <input type="checkbox" name="delete_images">
                         <label style="margin: 0;">Delete raw images</label>
@@ -247,13 +251,21 @@ def generate_manual():
     cam_id = int(request.form.get('cam_id'))
     date_str = request.form.get('date')
     fps = int(request.form.get('fps', 30))
+    custom_name = request.form.get('custom_name', "").strip()
     delete_images = 'delete_images' in request.form
     
     config = load_config()
     if 0 <= cam_id < len(config['cameras']):
         name = config['cameras'][cam_id]['name']
         target_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-        threading.Thread(target=lambda: generate_timelapse(target_date=target_date, manual_fps=fps, manual_delete=delete_images)).start()
+        # Pass the specific camera name to ONLY generate for that one
+        threading.Thread(target=lambda: generate_timelapse(
+            target_date=target_date, 
+            manual_fps=fps, 
+            manual_delete=delete_images,
+            target_cam_name=name,
+            custom_name=custom_name
+        )).start()
         
     return redirect('/')
 
@@ -496,7 +508,7 @@ def fallback_opencv(images, output_video, fps, size):
             out.write(frame)
     out.release()
 
-def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
+def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None, target_cam_name=None, custom_name=None):
     config = load_config()
     if not config:
         return
@@ -511,10 +523,13 @@ def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
         yesterday = datetime.datetime.now() - datetime.timedelta(days=1)
         date_str = yesterday.strftime("%Y-%m-%d")
     
-    logging.info(f"Starting timelapse generation for date: {date_str} (FPS: {fps}, Delete: {delete_images})")
-    
     for cam in config.get("cameras", []):
         name = cam.get("name")
+        
+        # If a target camera was specified, skip all others
+        if target_cam_name and name != target_cam_name:
+            continue
+            
         # Sanitize name for filename (remove slashes)
         safe_name = name.replace("/", "_").replace("\\", "_")
         
@@ -524,7 +539,12 @@ def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
             logging.info(f"No images found for {name} on {date_str}. Skipping.")
             continue
             
-        output_video = os.path.join(DATA_DIR, name, f"{safe_name}_{date_str}.mp4")
+        # Use custom name if provided, otherwise default to camera_date.mp4
+        if custom_name:
+            safe_custom = "".join([c for c in custom_name if c.isalnum() or c in (' ', '.', '_', '-')]).strip()
+            output_video = os.path.join(DATA_DIR, name, f"{safe_custom}.mp4")
+        else:
+            output_video = os.path.join(DATA_DIR, name, f"{safe_name}_{date_str}.mp4")
         
         images = sorted(glob.glob(os.path.join(cam_dir, "*.jpg")))
         if not images:
