@@ -156,6 +156,10 @@ HTML_TEMPLATE = """
             <div class="meta" style="word-break: break-all; opacity: 0.5;">{{ cam.url }}</div>
             <div class="meta">Latest: {{ cam.latest_time }}</div>
             
+            <div style="margin-bottom: 10px;">
+                <a href="/gallery/{{ cam.id }}/{{ cam.latest_time.split(' ')[0] }}" style="color: #00ff88; text-decoration: none; font-size: 0.9em; font-weight: bold;">📁 View Today's Images</a>
+            </div>
+
             {% if cam.latest_img %}
                 <img src="/data/{{ cam.latest_img }}" alt="Latest">
             {% else %}
@@ -247,6 +251,56 @@ def generate_manual():
         threading.Thread(target=lambda: generate_timelapse(target_date=target_date, manual_fps=fps, manual_delete=delete_images)).start()
         
     return redirect('/')
+
+@app.route('/gallery/<int:cam_id>/<date>')
+def gallery(cam_id, date):
+    config = load_config()
+    if 0 <= cam_id < len(config['cameras']):
+        name = config['cameras'][cam_id]['name']
+        cam_dir = os.path.join(DATA_DIR, name, date)
+        images = []
+        if os.path.exists(cam_dir):
+            all_imgs = sorted([f for f in os.listdir(cam_dir) if f.endswith('.jpg')])
+            for img in all_imgs:
+                images.append({
+                    "name": img,
+                    "path": f"{name}/{date}/{img}".replace("\\", "/")
+                })
+        return render_template_string(GALLERY_TEMPLATE, name=name, date=date, images=images)
+    return redirect('/')
+
+GALLERY_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Gallery - {{ name }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: white; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+        .img-container { background: #333; padding: 5px; border-radius: 8px; text-align: center; }
+        img { width: 100%; border-radius: 4px; cursor: pointer; }
+        .back { display: inline-block; margin-bottom: 20px; color: #00ff88; text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <a href="/" class="back">← Back to Dashboard</a>
+    <h1>🖼️ {{ name }} - {{ date }}</h1>
+    <p>Showing {{ images|length }} images. Click to open full size.</p>
+    <div class="grid">
+        {% for img in images %}
+        <div class="img-container">
+            <a href="/data/{{ img.path }}" target="_blank">
+                <img src="/data/{{ img.path }}" alt="{{ img.name }}" loading="lazy">
+            </a>
+            <div style="font-size: 0.7em; margin-top: 5px; color: #888;">{{ img.name }}</div>
+        </div>
+        {% endfor %}
+    </div>
+</body>
+</html>
+"""
 
 @app.route('/')
 def index():
