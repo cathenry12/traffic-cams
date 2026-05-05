@@ -2,7 +2,7 @@
   "capture_interval_seconds": 60,
   "playback_fps": 30,
   "generate_timelapse_schedule": "00:00",
-  "delete_images_after_compile": true,
+  "delete_images_after_compile": false,
   "cameras": [
     {
       "name": "sample_camera",

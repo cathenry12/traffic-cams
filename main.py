@@ -111,7 +111,7 @@ HTML_TEMPLATE = """
                         <input type="number" name="fps" value="{{ config.playback_fps }}">
                     </div>
                     <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px;">
-                        <input type="checkbox" name="delete_images" checked>
+                        <input type="checkbox" name="delete_images">
                         <label style="margin: 0;">Delete raw images</label>
                     </div>
                 </div>
@@ -268,6 +268,7 @@ def delete_video(filename):
         os.remove(full_path)
         logging.info(f"Deleted video archive: {full_path}")
     return redirect('/')
+@app.route('/gallery/<int:cam_id>/<date>')
 def gallery(cam_id, date):
     config = load_config()
     if 0 <= cam_id < len(config['cameras']):
@@ -545,24 +546,17 @@ def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
         
         # Generate a temporary file list for ffmpeg
         list_file = os.path.join(cam_dir, "ffmpeg_list.txt")
-        with open(list_file, 'w') as f:
+        with open(list_file, 'w', encoding='utf-8') as f:
             for image_path in images:
-                # ffmpeg requires paths in a specific format in the list file
-                f.write(f"file '{os.path.abspath(image_path)}'\\n")
+                # Use forward slashes for ffmpeg compatibility
+                abs_path = os.path.abspath(image_path).replace("\\", "/")
+                f.write(f"file '{abs_path}'\n")
         
         logging.info(f"Compiling {len(images)} images for {name} using FFmpeg.")
         
-        # FFmpeg command:
-        # -y: overwrite
-        # -r: input framerate
-        # -f concat: use the list file
-        # -safe 0: allow absolute paths
-        # -c:v libx264: use H.264
-        # -pix_fmt yuv420p: ensure compatibility with all players
-        # -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2": ensure even dimensions
         cmd = [
-            "ffmpeg", "-y", "-r", str(fps), 
-            "-f", "concat", "-safe", "0", "-i", list_file,
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", 
+            "-r", str(fps), "-i", list_file,
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
             output_video
@@ -570,14 +564,16 @@ def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
         
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode == 0:
+            if result.returncode == 0 and os.path.exists(output_video) and os.path.getsize(output_video) > 1000:
                 logging.info(f"Finished timelapse via FFmpeg: {output_video}")
             else:
-                logging.error(f"FFmpeg failed: {result.stderr}")
+                error_msg = result.stderr if result.stderr else "Unknown error or zero-size file"
+                logging.error(f"FFmpeg failed or produced empty file: {error_msg}")
                 # Fallback to OpenCV if FFmpeg is missing/fails
                 fallback_opencv(images, output_video, fps, size)
         except Exception as e:
             logging.error(f"Error running FFmpeg: {e}")
+            fallback_opencv(images, output_video, fps, size)
         
         # Clean up list file
         if os.path.exists(list_file):
