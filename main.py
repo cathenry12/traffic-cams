@@ -199,8 +199,8 @@ HTML_TEMPLATE = """
             }
         }
         
-        // Initial check
-        document.addEventListener('DOMContentLoaded', updateStats);
+        // Initial check - don't run on load to prevent Firefox hangs
+        // document.addEventListener('DOMContentLoaded', updateStats);
     </script>
 </body>
 </html>
