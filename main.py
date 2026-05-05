@@ -503,15 +503,19 @@ def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
         if not images:
             continue
             
-        logging.info(f"Compiling {len(images)} images for {name} into {output_video} at {fps} FPS.")
-        
+        # Read first image to get dimensions
         first_frame = cv2.imread(images[0])
         if first_frame is None:
             logging.error(f"Failed to read first image {images[0]}")
             continue
             
         height, width, layers = first_frame.shape
+        # FORCE EVEN DIMENSIONS (Crucial for many codecs to prevent smearing)
+        width = (width // 2) * 2
+        height = (height // 2) * 2
         size = (width, height)
+        
+        logging.info(f"Compiling {len(images)} images for {name} into {output_video} at {fps} FPS. Size: {width}x{height}")
         
         # Try avc1 (H.264) for better web compatibility, fallback to mp4v
         try:
@@ -526,8 +530,8 @@ def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
         for image_path in images:
             frame = cv2.imread(image_path)
             if frame is not None:
-                if (frame.shape[1], frame.shape[0]) != size:
-                    frame = cv2.resize(frame, size)
+                # Always resize to the target even size to ensure consistency
+                frame = cv2.resize(frame, size)
                 out.write(frame)
         
         out.release()
