@@ -91,9 +91,9 @@ HTML_TEMPLATE = """
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                     <div class="form-group">
                         <label>Select Camera</label>
-                        <select name="name" id="manual-cam" onchange="updateStats()">
+                        <select name="cam_id" id="manual-cam" onchange="updateStats()">
                             {% for cam in cameras %}
-                                <option value="{{ cam.name }}">{{ cam.name }}</option>
+                                <option value="{{ cam.id }}">{{ cam.name }}</option>
                             {% endfor %}
                         </select>
                     </div>
@@ -178,23 +178,23 @@ HTML_TEMPLATE = """
         }
 
         async function updateStats() {
-            const cam = document.getElementById('manual-cam').value;
+            const camId = document.getElementById('manual-cam').value;
             const date = document.getElementById('manual-date').value;
             const display = document.getElementById('stats-display');
-            if (!cam || !date) {
+            if (camId === "" || !date) {
                 display.innerText = "Select a camera and date first.";
                 return;
             }
             
             display.innerText = "Checking...";
             try {
-                const res = await fetch(`/stats/${encodeURIComponent(cam)}/${encodeURIComponent(date)}`);
+                const res = await fetch(`/stats/${camId}/${encodeURIComponent(date)}`);
                 if (!res.ok) throw new Error("Server error");
                 const data = await res.json();
                 display.innerText = `Folder contains ${data.count} images for this time-lapse.`;
             } catch (err) {
                 console.error(err);
-                display.innerText = "Error: Could not fetch stats. Make sure the service is running.";
+                display.innerText = "Error: Could not fetch stats. Check logs.";
             }
         }
         
@@ -220,25 +220,29 @@ def update_settings():
     setup_scheduler() # Refresh the scheduler with new settings
     return redirect('/')
 
-@app.route('/stats/<name>/<date>')
-def get_stats(name, date):
-    cam_dir = os.path.join(DATA_DIR, name, date)
-    count = 0
-    if os.path.exists(cam_dir):
-        # Fast way to count files
-        count = len([f for f in os.listdir(cam_dir) if f.endswith('.jpg')])
-    return jsonify({"count": count})
+@app.route('/stats/<int:cam_id>/<date>')
+def get_stats(cam_id, date):
+    config = load_config()
+    if 0 <= cam_id < len(config['cameras']):
+        name = config['cameras'][cam_id]['name']
+        cam_dir = os.path.join(DATA_DIR, name, date)
+        count = 0
+        if os.path.exists(cam_dir):
+            count = len([f for f in os.listdir(cam_dir) if f.endswith('.jpg')])
+        return jsonify({"count": count})
+    return jsonify({"count": 0})
 
 @app.route('/generate_manual', methods=['POST'])
 def generate_manual():
-    name = request.form.get('name')
-    date_str = request.form.get('date') # YYYY-MM-DD
+    cam_id = int(request.form.get('cam_id'))
+    date_str = request.form.get('date')
     fps = int(request.form.get('fps', 30))
     delete_images = 'delete_images' in request.form
     
-    if name and date_str:
+    config = load_config()
+    if 0 <= cam_id < len(config['cameras']):
+        name = config['cameras'][cam_id]['name']
         target_date = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-        # Run in a separate thread to not block the UI
         threading.Thread(target=lambda: generate_timelapse(target_date=target_date, manual_fps=fps, manual_delete=delete_images)).start()
         
     return redirect('/')
