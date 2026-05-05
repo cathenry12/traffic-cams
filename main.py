@@ -277,9 +277,11 @@ def index():
         # Find all videos (these are in the camera root, so no recursion needed)
         videos = []
         if os.path.exists(cam_root):
+            safe_name = name.replace("/", "_").replace("\\", "_")
             all_vids = sorted([f for f in os.listdir(cam_root) if f.endswith('.mp4')], reverse=True)
             for v in all_vids:
-                date_part = v.replace(f"{name}_", "").replace(".mp4", "")
+                # Use sanitized name for matching
+                date_part = v.replace(f"{safe_name}_", "").replace(".mp4", "")
                 videos.append({"path": f"{name}/{v}".replace("\\", "/"), "date": date_part})
 
         camera_data.append({
@@ -431,13 +433,16 @@ def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
     
     for cam in config.get("cameras", []):
         name = cam.get("name")
+        # Sanitize name for filename (remove slashes)
+        safe_name = name.replace("/", "_").replace("\\", "_")
+        
         cam_dir = os.path.join(DATA_DIR, name, date_str)
         
         if not os.path.exists(cam_dir):
             logging.info(f"No images found for {name} on {date_str}. Skipping.")
             continue
             
-        output_video = os.path.join(DATA_DIR, name, f"{name}_{date_str}.mp4")
+        output_video = os.path.join(DATA_DIR, name, f"{safe_name}_{date_str}.mp4")
         
         images = sorted(glob.glob(os.path.join(cam_dir, "*.jpg")))
         if not images:
