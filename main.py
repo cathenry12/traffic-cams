@@ -169,7 +169,12 @@ HTML_TEMPLATE = """
             <div class="video-list">
                 <strong>Archive:</strong>
                 {% for vid in cam.videos %}
-                    <a class="video-link" href="/data/{{ vid.path }}" target="_blank">🎬 {{ vid.date }}</a>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                        <a class="video-link" href="/data/{{ vid.path }}" target="_blank" style="margin-bottom: 0;">🎬 {{ vid.date }}</a>
+                        <form action="/delete_video/{{ vid.path }}" method="POST" onsubmit="return confirm('Delete this video?');">
+                            <button type="submit" style="background: none; color: #ff4444; padding: 0; font-size: 1.2em;">&times;</button>
+                        </form>
+                    </div>
                 {% endfor %}
             </div>
         </div>
@@ -252,7 +257,17 @@ def generate_manual():
         
     return redirect('/')
 
-@app.route('/gallery/<int:cam_id>/<date>')
+@app.route('/delete_video/<path:filename>', methods=['POST'])
+def delete_video(filename):
+    # Security check: Ensure the filename is within the DATA_DIR and is an mp4
+    if not filename.endswith('.mp4'):
+        return "Invalid file type", 400
+    
+    full_path = os.path.join(DATA_DIR, filename)
+    if os.path.exists(full_path):
+        os.remove(full_path)
+        logging.info(f"Deleted video archive: {full_path}")
+    return redirect('/')
 def gallery(cam_id, date):
     config = load_config()
     if 0 <= cam_id < len(config['cameras']):
