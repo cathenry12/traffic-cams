@@ -23,8 +23,9 @@ app = Flask(__name__)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
     <title>Traffic Cam Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -199,7 +200,7 @@ HTML_TEMPLATE = """
         }
         
         // Initial check
-        window.onload = updateStats;
+        document.addEventListener('DOMContentLoaded', updateStats);
     </script>
 </body>
 </html>
@@ -458,8 +459,15 @@ def generate_timelapse(target_date=None, manual_fps=None, manual_delete=None):
         height, width, layers = first_frame.shape
         size = (width, height)
         
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_video, fourcc, fps, size)
+        # Try avc1 (H.264) for better web compatibility, fallback to mp4v
+        try:
+            fourcc = cv2.VideoWriter_fourcc(*'avc1')
+            out = cv2.VideoWriter(output_video, fourcc, fps, size)
+            if not out.isOpened():
+                raise Exception("avc1 failed")
+        except:
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(output_video, fourcc, fps, size)
         
         for image_path in images:
             frame = cv2.imread(image_path)
