@@ -223,7 +223,10 @@ def update_settings():
 @app.route('/stats/<name>/<date>')
 def get_stats(name, date):
     cam_dir = os.path.join(DATA_DIR, name, date)
-    count = len(glob.glob(os.path.join(cam_dir, "*.jpg"))) if os.path.exists(cam_dir) else 0
+    count = 0
+    if os.path.exists(cam_dir):
+        # Fast way to count files
+        count = len([f for f in os.listdir(cam_dir) if f.endswith('.jpg')])
     return jsonify({"count": count})
 
 @app.route('/generate_manual', methods=['POST'])
