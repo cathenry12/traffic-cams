@@ -8,6 +8,7 @@ import datetime
 import subprocess
 import glob
 import cv2
+import shutil
 import threading
 from flask import Flask, render_template_string, send_from_directory, request, redirect, jsonify
 
@@ -28,42 +29,324 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <title>Traffic Cam Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: white; padding: 20px; max-width: 1200px; margin: auto; }
-        .camera-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
-        .camera-card { background: #2a2a2a; border-radius: 12px; padding: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); position: relative; }
-        img, video { width: 100%; border-radius: 8px; margin-top: 10px; background: #000; min-height: 200px; }
-        h1 { text-align: center; color: #00ff88; margin-bottom: 30px; }
-        h2 { margin: 0; color: #00d2ff; display: flex; justify-content: space-between; align-items: center; }
-        .meta { font-size: 0.8em; color: #888; margin-bottom: 10px; }
-        .video-list { margin-top: 15px; font-size: 0.9em; max-height: 150px; overflow-y: auto; padding-right: 5px; }
-        .video-link { display: block; color: #ffcc00; text-decoration: none; margin-bottom: 5px; }
-        .video-link:hover { text-decoration: underline; }
-        
-        .section { background: #333; padding: 20px; border-radius: 12px; margin-bottom: 20px; border-left: 4px solid #00ff88; }
-        .section-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        @media (max-width: 768px) { .section-grid { grid-template-columns: 1fr; } }
-        
-        input, select { background: #444; border: 1px solid #555; color: white; padding: 8px; border-radius: 4px; margin-bottom: 10px; }
-        button { cursor: pointer; padding: 8px 15px; border-radius: 4px; border: none; font-weight: bold; transition: 0.2s; }
-        .btn-add { background: #00ff88; color: #1a1a1a; }
-        .btn-edit { background: #00d2ff; color: #1a1a1a; font-size: 0.8em; }
-        .btn-delete { background: #ff4444; color: white; font-size: 0.8em; }
-        .btn-manual { background: #ffcc00; color: #1a1a1a; }
-        
-        .form-group { display: flex; flex-direction: column; }
-        label { font-size: 0.8em; color: #888; margin-bottom: 4px; }
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: rgba(22, 28, 45, 0.7);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --accent-green: #10b981;
+            --accent-blue: #0ea5e9;
+            --accent-amber: #f59e0b;
+            --accent-red: #ef4444;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        body {
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, var(--bg-color) 70%);
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            padding: 30px 20px;
+            max-width: 1250px;
+            margin: auto;
+            min-height: 100vh;
+        }
+
+        h1, h2, h3 {
+            font-weight: 600;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 2.8rem;
+            margin-bottom: 40px;
+            font-weight: 800;
+            background: linear-gradient(to right, #38bdf8, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.03em;
+        }
+
+        /* Glassmorphism Cards */
+        .glass-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .glass-card:hover {
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+        }
+
+        .section-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+            gap: 24px;
+            margin-bottom: 30px;
+        }
+
+        .camera-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+            gap: 24px;
+            margin-top: 30px;
+        }
+
+        .camera-card {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        img, video {
+            width: 100%;
+            border-radius: 12px;
+            margin-top: 15px;
+            background: #020617;
+            min-height: 220px;
+            object-fit: cover;
+            border: 1px solid var(--border-color);
+        }
+
+        h2 {
+            margin: 0 0 15px 0;
+            font-size: 1.4rem;
+            color: #ffffff;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .meta {
+            font-size: 0.85em;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .video-list {
+            margin-top: 20px;
+            font-size: 0.9em;
+            max-height: 180px;
+            overflow-y: auto;
+            padding-right: 8px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 15px;
+        }
+
+        .video-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .video-item:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .video-link {
+            color: var(--accent-amber);
+            text-decoration: none;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .video-link:hover {
+            color: #fbbf24;
+            text-decoration: underline;
+        }
+
+        input, select {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            color: white;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            transition: all 0.2s;
+            outline: none;
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+        }
+
+        button {
+            cursor: pointer;
+            padding: 10px 18px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 600;
+            font-family: inherit;
+            font-size: 0.95rem;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .btn-add {
+            background: var(--accent-green);
+            color: #042f1a;
+        }
+        .btn-add:hover {
+            background: #34d399;
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-edit {
+            background: rgba(14, 165, 233, 0.15);
+            color: #38bdf8;
+            font-size: 0.85em;
+            padding: 6px 12px;
+            border: 1px solid rgba(14, 165, 233, 0.3);
+        }
+        .btn-edit:hover {
+            background: var(--accent-blue);
+            color: #0f172a;
+        }
+
+        .btn-delete {
+            background: rgba(239, 68, 68, 0.15);
+            color: #f87171;
+            font-size: 0.85em;
+            padding: 6px 12px;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .btn-delete:hover {
+            background: var(--accent-red);
+            color: white;
+        }
+
+        .btn-manual {
+            background: var(--accent-amber);
+            color: #451a03;
+        }
+        .btn-manual:hover {
+            background: #fbbf24;
+            box-shadow: 0 0 15px rgba(245, 158, 11, 0.3);
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+
+        label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        /* Storage Progress Bar */
+        .progress-bar-container {
+            width: 100%;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 10px 0;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(to right, var(--accent-blue), var(--accent-green));
+            border-radius: 5px;
+            transition: width 0.5s ease-in-out;
+        }
+
+        .storage-stat-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            margin-bottom: 4px;
+        }
+
+        .storage-stat-row span:last-child {
+            font-weight: 600;
+        }
+
+        /* Scrollbar customizing */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
     </style>
 </head>
 <body>
     <h1>🚦 Traffic Camera Dashboard</h1>
 
     <div class="section-grid">
+        <!-- Storage Utilization Widget -->
+        <div class="glass-card" style="border-left: 4px solid var(--accent-blue);">
+            <h3 style="margin-top: 0; color: var(--accent-blue); display: flex; align-items: center; gap: 8px;">💾 Storage Status</h3>
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <div class="storage-stat-row">
+                    <span>App Data size:</span>
+                    <span style="color: var(--accent-green);">{{ storage.app_size }}</span>
+                </div>
+                <div class="storage-stat-row">
+                    <span>Disk Used:</span>
+                    <span>{{ storage.disk_used }}</span>
+                </div>
+                <div class="storage-stat-row">
+                    <span>Disk Capacity:</span>
+                    <span>{{ storage.disk_total }}</span>
+                </div>
+                <div class="storage-stat-row">
+                    <span>Disk Available:</span>
+                    <span style="color: var(--accent-blue);">{{ storage.disk_free }}</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" style="width: {{ storage.disk_percent }}%;"></div>
+                </div>
+                <div style="font-size: 0.75rem; text-align: right; color: var(--text-muted);">
+                    Disk utilization: {{ storage.disk_percent|round(1) }}%
+                </div>
+            </div>
+        </div>
+
         <!-- Global Settings -->
-        <div class="section">
-            <h3>⚙️ Global Settings</h3>
+        <div class="glass-card" style="border-left: 4px solid var(--accent-green);">
+            <h3 style="margin-top: 0; color: var(--accent-green); display: flex; align-items: center; gap: 8px;">⚙️ Global Settings</h3>
             <form action="/settings" method="POST">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                     <div class="form-group">
                         <label>Capture Interval (sec)</label>
                         <input type="number" name="interval" value="{{ config.capture_interval_seconds }}">
@@ -76,20 +359,22 @@ HTML_TEMPLATE = """
                         <label>Auto-Schedule (Time)</label>
                         <input type="text" name="schedule" value="{{ config.generate_timelapse_schedule }}">
                     </div>
-                    <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px;">
-                        <input type="checkbox" name="delete_images" {% if config.delete_images_after_compile %}checked{% endif %}>
-                        <label style="margin: 0;">Auto-delete images</label>
+                    <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px; margin-top: 25px;">
+                        <input type="checkbox" name="delete_images" id="delete_images_chk" {% if config.delete_images_after_compile %}checked{% endif %} style="width: auto;">
+                        <label for="delete_images_chk" style="margin: 0; cursor: pointer;">Auto-delete images</label>
                     </div>
                 </div>
-                <button type="submit" class="btn-add" style="width: 100%; margin-top: 10px;">Update All Settings</button>
+                <button type="submit" class="btn-add" style="width: 100%; margin-top: 15px;">Update Settings</button>
             </form>
         </div>
+    </div>
 
+    <div class="section-grid">
         <!-- Manual Generation -->
-        <div class="section" style="border-left-color: #ffcc00;">
-            <h3>🎬 Manual Time-lapse</h3>
+        <div class="glass-card" style="border-left: 4px solid var(--accent-amber);">
+            <h3 style="margin-top: 0; color: var(--accent-amber); display: flex; align-items: center; gap: 8px;">🎬 Manual Daily Time-lapse</h3>
             <form action="/generate_manual" method="POST">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                     <div class="form-group">
                         <label>Select Camera</label>
                         <select name="cam_id" id="manual-cam" onchange="updateStats()">
@@ -107,76 +392,122 @@ HTML_TEMPLATE = """
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>FPS Overide</label>
+                        <label>FPS Override</label>
                         <input type="number" name="fps" value="{{ config.playback_fps }}">
                     </div>
                     <div class="form-group">
                         <label>Custom Name (Optional)</label>
                         <input type="text" name="custom_name" placeholder="e.g. morning_rush">
                     </div>
-                    <div class="form-group" style="flex-direction: row; align-items: center; gap: 10px;">
-                        <input type="checkbox" name="delete_images">
-                        <label style="margin: 0;">Delete raw images</label>
+                    <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px; margin-top: 25px;">
+                        <input type="checkbox" name="delete_images" id="manual_delete_chk" style="width: auto;">
+                        <label for="manual_delete_chk" style="margin: 0; cursor: pointer;">Delete raw images</label>
                     </div>
                 </div>
-                <div id="stats-display" style="font-size: 0.8em; color: #ffcc00; margin-bottom: 10px;">Select a date to see image count...</div>
+                <div id="stats-display" style="font-size: 0.8em; color: var(--accent-amber); margin: 10px 0;">Select a date to see image count...</div>
                 <button type="submit" class="btn-manual" style="width: 100%;">🚀 Generate Now</button>
+            </form>
+        </div>
+
+        <!-- Merge Range of Videos -->
+        <div class="glass-card" style="border-left: 4px solid #818cf8;">
+            <h3 style="margin-top: 0; color: #818cf8; display: flex; align-items: center; gap: 8px;">🔗 Merge Video Date Range</h3>
+            <form action="/merge_videos" method="POST">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group" style="grid-column: span 2;">
+                        <label>Select Camera</label>
+                        <select name="cam_id" required>
+                            {% for cam in cameras %}
+                                <option value="{{ cam.id }}">{{ cam.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Start Date</label>
+                        <input type="date" name="start_date" required>
+                    </div>
+                    <div class="form-group">
+                        <label>End Date</label>
+                        <input type="date" name="end_date" required>
+                    </div>
+                    <div class="form-group" style="flex-direction: row; align-items: center; gap: 8px; margin-top: 15px; grid-column: span 2;">
+                        <input type="checkbox" name="delete_sources" id="merge_delete_chk" style="width: auto;">
+                        <label for="merge_delete_chk" style="margin: 0; cursor: pointer;">Delete source videos after merge</label>
+                    </div>
+                </div>
+                <button type="submit" class="btn-manual" style="width: 100%; margin-top: 15px; background: #818cf8; color: #1e1b4b;">🔗 Merge Videos</button>
             </form>
         </div>
     </div>
 
     <!-- Add Camera -->
-    <div class="section" style="border-left-color: #00d2ff;">
-        <h3>➕ Add New Camera</h3>
-        <form action="/add" method="POST" style="display: flex; flex-wrap: wrap; gap: 10px;">
-            <input type="text" name="name" placeholder="Camera Name" required>
-            <input type="url" name="url" placeholder="Camera Feed URL" required style="flex-grow: 1;">
-            <button type="submit" class="btn-add">Add Camera</button>
+    <div class="glass-card" style="border-left: 4px solid var(--accent-blue); margin-bottom: 30px;">
+        <h3 style="margin-top: 0; color: var(--accent-blue);">➕ Add New Camera</h3>
+        <form action="/add" method="POST" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
+            <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
+                <label>Camera Name</label>
+                <input type="text" name="name" placeholder="Camera Name" required>
+            </div>
+            <div class="form-group" style="flex: 2; min-width: 300px; margin-bottom: 0;">
+                <label>Camera Feed URL</label>
+                <input type="url" name="url" placeholder="Camera Feed URL" required style="width: 100%;">
+            </div>
+            <button type="submit" class="btn-add" style="height: 44px; padding: 0 24px;">Add Camera</button>
         </form>
     </div>
 
     <div class="camera-grid">
         {% for cam in cameras %}
-        <div class="camera-card">
-            <h2>
-                {{ cam.name }}
-                <div style="display: flex; gap: 5px;">
-                    <button class="btn-edit" onclick="toggleEdit({{ cam.id }})">Edit</button>
-                    <form action="/delete/{{ cam.id }}" method="POST" style="display:inline;" onsubmit="return confirm('Delete?');">
-                        <button type="submit" class="btn-delete">Del</button>
+        <div class="glass-card camera-card">
+            <div>
+                <h2>
+                    <span>{{ cam.name }}</span>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-edit" onclick="toggleEdit({{ cam.id }})">Edit</button>
+                        <form action="/delete/{{ cam.id }}" method="POST" style="display:inline;" onsubmit="return confirm('Delete?');">
+                            <button type="submit" class="btn-delete">Del</button>
+                        </form>
+                    </div>
+                </h2>
+                
+                <div id="edit-{{ cam.id }}" style="display:none; margin: 15px 0; background: rgba(0,0,0,0.2); padding: 15px; border-radius: 12px; border: 1px solid var(--border-color);">
+                    <form action="/edit/{{ cam.id }}" method="POST">
+                        <div class="form-group">
+                            <label>Name</label>
+                            <input type="text" name="name" value="{{ cam.name }}">
+                        </div>
+                        <div class="form-group">
+                            <label>URL</label>
+                            <input type="url" name="url" value="{{ cam.url }}">
+                        </div>
+                        <div style="display: flex; gap: 8px; margin-top: 10px;">
+                            <button type="submit" class="btn-edit" style="background: var(--accent-blue); color: white;">Save</button>
+                            <button type="button" onclick="toggleEdit({{ cam.id }})" style="background: rgba(255,255,255,0.1); color: white;">Cancel</button>
+                        </div>
                     </form>
                 </div>
-            </h2>
-            
-            <div id="edit-{{ cam.id }}" style="display:none; margin-top:10px; background:#333; padding:10px; border-radius:8px;">
-                <form action="/edit/{{ cam.id }}" method="POST">
-                    <input type="text" name="name" value="{{ cam.name }}" style="width:90%">
-                    <input type="url" name="url" value="{{ cam.url }}" style="width:90%">
-                    <button type="submit" class="btn-edit">Save</button>
-                    <button type="button" onclick="toggleEdit({{ cam.id }})" style="background:#666; color:white;">X</button>
-                </form>
-            </div>
 
-            <div class="meta" style="word-break: break-all; opacity: 0.5;">{{ cam.url }}</div>
-            <div class="meta">Latest: {{ cam.latest_time }}</div>
-            
-            <div style="margin-bottom: 10px;">
-                <a href="/gallery/{{ cam.id }}/{{ cam.latest_time.split(' ')[0] }}" style="color: #00ff88; text-decoration: none; font-size: 0.9em; font-weight: bold;">📁 View Today's Images</a>
-            </div>
+                <div class="meta" style="word-break: break-all; opacity: 0.7;">🔗 {{ cam.url }}</div>
+                <div class="meta">⏱️ Latest: {{ cam.latest_time }}</div>
+                
+                <div style="margin: 15px 0;">
+                    <a href="/gallery/{{ cam.id }}/{{ cam.latest_time.split(' ')[0] }}" style="color: var(--accent-green); text-decoration: none; font-size: 0.95em; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;">📁 View Today's Images &rarr;</a>
+                </div>
 
-            {% if cam.latest_img %}
-                <img src="/data/{{ cam.latest_img }}" alt="Latest">
-            {% else %}
-                <div style="height:200px; display:flex; align-items:center; justify-content:center; background:#333; border-radius:8px;">No images</div>
-            {% endif %}
+                {% if cam.latest_img %}
+                    <img src="/data/{{ cam.latest_img }}" alt="Latest Image">
+                {% else %}
+                    <div style="height:220px; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.3); border-radius:12px; border: 1px dashed var(--border-color); color: var(--text-muted);">No images captured yet</div>
+                {% endif %}
+            </div>
             
             <div class="video-list">
-                <strong>Archive:</strong>
+                <strong style="display: block; margin-bottom: 10px; color: var(--accent-blue);">🎥 Video Archive:</strong>
                 {% for vid in cam.videos %}
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
-                        <a class="video-link" href="/data/{{ vid.path }}" target="_blank" style="margin-bottom: 0;">🎬 {{ vid.date }}</a>
-                        <form action="/delete_video/{{ vid.path }}" method="POST" onsubmit="return confirm('Delete this video?');">
-                            <button type="submit" style="background: none; color: #ff4444; padding: 0; font-size: 1.2em;">&times;</button>
+                    <div class="video-item">
+                        <a class="video-link" href="/data/{{ vid.path }}" target="_blank">🎬 {{ vid.date }}</a>
+                        <form action="/delete_video/{{ vid.path }}" method="POST" onsubmit="return confirm('Delete this video?');" style="margin: 0;">
+                            <button type="submit" style="background: none; color: var(--accent-red); padding: 0; font-size: 1.25em; border: none; cursor: pointer;">&times;</button>
                         </form>
                     </div>
                 {% endfor %}
@@ -211,13 +542,172 @@ HTML_TEMPLATE = """
                 display.innerText = "Error: Could not fetch stats. Check logs.";
             }
         }
-        
-        // Initial check - don't run on load to prevent Firefox hangs
-        // document.addEventListener('DOMContentLoaded', updateStats);
     </script>
 </body>
 </html>
 """
+
+def get_storage_stats():
+    total_size = 0
+    if os.path.exists(DATA_DIR):
+        for dirpath, dirnames, filenames in os.walk(DATA_DIR):
+            for f in filenames:
+                fp = os.path.join(dirpath, f)
+                if not os.path.islink(fp):
+                    try:
+                        total_size += os.path.getsize(fp)
+                    except OSError:
+                        pass
+    try:
+        usage = shutil.disk_usage(DATA_DIR if os.path.exists(DATA_DIR) else ".")
+        disk_total = usage.total
+        disk_free = usage.free
+    except Exception:
+        disk_total = 0
+        disk_free = 0
+    return {
+        "app_size_bytes": total_size,
+        "disk_total_bytes": disk_total,
+        "disk_free_bytes": disk_free
+    }
+
+def format_size(size_bytes):
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024**2:
+        return f"{size_bytes / 1024:.2f} KB"
+    elif size_bytes < 1024**3:
+        return f"{size_bytes / (1024**2):.2f} MB"
+    else:
+        return f"{size_bytes / (1024**3):.2f} GB"
+
+def concat_videos_opencv(video_paths, output_path):
+    if not video_paths:
+        return False
+    try:
+        cap = cv2.VideoCapture(video_paths[0])
+        if not cap.isOpened():
+            return False
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        
+        if fps <= 0: fps = 30
+        if width <= 0 or height <= 0:
+            width, height = 640, 480
+            
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        
+        for path in video_paths:
+            vc = cv2.VideoCapture(path)
+            while vc.isOpened():
+                ret, frame = vc.read()
+                if not ret:
+                    break
+                if frame.shape[1] != width or frame.shape[0] != height:
+                    frame = cv2.resize(frame, (width, height))
+                out.write(frame)
+            vc.release()
+        out.release()
+        return True
+    except Exception as e:
+        logging.error(f"Error in OpenCV video concatenation: {e}")
+        return False
+
+def do_merge_videos(video_paths, output_path, delete_sources=False):
+    logging.info(f"Merging {len(video_paths)} videos into {output_path}")
+    list_file = output_path + ".txt"
+    with open(list_file, 'w', encoding='utf-8') as f:
+        for p in video_paths:
+            abs_path = os.path.abspath(p).replace("\\", "/")
+            f.write(f"file '{abs_path}'\n")
+            
+    cmd = [
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+        "-i", list_file, "-c", "copy", output_path
+    ]
+    
+    success = False
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 1000:
+            logging.info(f"Finished merging videos via FFmpeg: {output_path}")
+            success = True
+        else:
+            logging.error(f"FFmpeg merge failed: {result.stderr}")
+    except Exception as e:
+        logging.error(f"Error running FFmpeg merge: {e}")
+        
+    if os.path.exists(list_file):
+        os.remove(list_file)
+        
+    if not success:
+        logging.info("Falling back to OpenCV video merging")
+        success = concat_videos_opencv(video_paths, output_path)
+        if success:
+            logging.info(f"Finished merging videos via OpenCV: {output_path}")
+        else:
+            logging.error("OpenCV video merging failed as well.")
+
+    if success and delete_sources:
+        logging.info(f"Deleting {len(video_paths)} source videos after successful merge.")
+        for p in video_paths:
+            try:
+                # Do not delete the merged video itself if it somehow matches
+                if os.path.exists(p) and os.path.abspath(p) != os.path.abspath(output_path):
+                    os.remove(p)
+                    logging.info(f"Deleted source video: {p}")
+            except Exception as e:
+                logging.error(f"Error deleting source video {p}: {e}")
+
+@app.route('/merge_videos', methods=['POST'])
+def merge_videos():
+    cam_id = int(request.form.get('cam_id'))
+    start_date_str = request.form.get('start_date')
+    end_date_str = request.form.get('end_date')
+    delete_sources = 'delete_sources' in request.form
+    
+    config = load_config()
+    if 0 <= cam_id < len(config['cameras']):
+        name = config['cameras'][cam_id]['name']
+        safe_name = name.replace("/", "_").replace("\\", "_")
+        cam_root = os.path.join(DATA_DIR, name)
+        
+        if not os.path.exists(cam_root):
+            return "Camera directory not found", 404
+            
+        try:
+            start_date = datetime.datetime.strptime(start_date_str, "%Y-%m-%d")
+            end_date = datetime.datetime.strptime(end_date_str, "%Y-%m-%d")
+        except ValueError:
+            return "Invalid date format. Use YYYY-MM-DD.", 400
+            
+        all_files = os.listdir(cam_root)
+        matching_vids = []
+        for f in all_files:
+            if f.endswith('.mp4') and f.startswith(f"{safe_name}_"):
+                date_part = f.replace(f"{safe_name}_", "").replace(".mp4", "")
+                try:
+                    f_date = datetime.datetime.strptime(date_part, "%Y-%m-%d")
+                    if start_date <= f_date <= end_date:
+                        matching_vids.append((f_date, os.path.join(cam_root, f)))
+                except ValueError:
+                    continue
+                    
+        matching_vids.sort()
+        
+        if len(matching_vids) == 0:
+            return "No videos found in that range for this camera", 400
+            
+        output_name = f"{safe_name}_merged_{start_date_str}_to_{end_date_str}.mp4"
+        output_path = os.path.join(cam_root, output_name)
+        video_paths = [path for date, path in matching_vids]
+        
+        threading.Thread(target=lambda: do_merge_videos(video_paths, output_path, delete_sources)).start()
+        
+    return redirect('/')
 
 def save_config(config):
     with open(CONFIG_FILE, 'w') as f:
@@ -336,6 +826,17 @@ def index():
     camera_data = []
     available_dates = set()
     
+    # Calculate storage stats
+    stats = get_storage_stats()
+    disk_used_bytes = stats["disk_total_bytes"] - stats["disk_free_bytes"]
+    storage_info = {
+        "app_size": format_size(stats["app_size_bytes"]),
+        "disk_used": format_size(disk_used_bytes),
+        "disk_total": format_size(stats["disk_total_bytes"]),
+        "disk_free": format_size(stats["disk_free_bytes"]),
+        "disk_percent": (disk_used_bytes / stats["disk_total_bytes"] * 100) if stats["disk_total_bytes"] > 0 else 0
+    }
+    
     # Efficiently find available dates and latest images
     for idx, cam in enumerate(config.get("cameras", [])):
         name = cam.get("name")
@@ -350,20 +851,18 @@ def index():
             
             if date_folders:
                 latest_date_dir = os.path.join(cam_root, date_folders[0])
-                # Fast way to get latest image without globbing everything
                 images = sorted([f for f in os.listdir(latest_date_dir) if f.endswith('.jpg')])
                 if images:
                     latest_img_name = images[-1]
                     latest_img = f"{name}/{date_folders[0]}/{latest_img_name}".replace("\\", "/")
                     latest_time = f"{date_folders[0]} {latest_img_name.replace('.jpg', '').replace('-', ':')}"
 
-        # Find all videos (these are in the camera root, so no recursion needed)
+        # Find all videos
         videos = []
         if os.path.exists(cam_root):
             safe_name = name.replace("/", "_").replace("\\", "_")
             all_vids = sorted([f for f in os.listdir(cam_root) if f.endswith('.mp4')], reverse=True)
             for v in all_vids:
-                # Use sanitized name for matching
                 date_part = v.replace(f"{safe_name}_", "").replace(".mp4", "")
                 videos.append({"path": f"{name}/{v}".replace("\\", "/"), "date": date_part})
 
@@ -375,6 +874,7 @@ def index():
     return render_template_string(HTML_TEMPLATE, 
                                 cameras=camera_data, 
                                 config=config, 
+                                storage=storage_info,
                                 available_dates=sorted(list(available_dates), reverse=True))
 
 @app.route('/add', methods=['POST'])
